@@ -3,10 +3,10 @@ import os
 from shutil import rmtree, copy, copytree
 from tempfile import mkdtemp
 
-from invoke import ctask as task
+from invoke import ctask as task, Collection
 
 
-def unpack(ctx, tmp, package, version, git_url=None):
+def unpack(c, tmp, package, version, git_url=None):
     """
     Download + unpack given package into temp dir ``tmp``.
 
@@ -33,19 +33,21 @@ def unpack(ctx, tmp, package, version, git_url=None):
             # Nab from index
             flags = "--download-cache= --download=. --build=build"
             cmd = "pip install %s %s==%s" % (flags, package, version)
-            ctx.run(cmd)
+            c.run(cmd)
             # Identify basename
+            # TODO: glob is bad here because pip install --download gets all
+            # dependencies too! ugh.
             zipfile = os.path.basename(glob("*.zip")[0])
             source = os.path.splitext(zipfile)[0]
             # Unzip
-            ctx.run("unzip *.zip")
+            c.run("unzip *.zip")
         finally:
             os.chdir(cwd)
     return real_version, source
 
 
 @task
-def vendorize(ctx, distribution, version, vendor_dir, package=None,
+def vendorize(c, distribution, version, vendor_dir, package=None,
     git_url=None, license=None):
     """
     Vendorize Python package ``distribution`` at version/SHA ``version``.
@@ -77,7 +79,7 @@ def vendorize(ctx, distribution, version, vendor_dir, package=None,
     target = os.path.join(vendor_dir, package)
     try:
         # Unpack source
-        real_version, source = unpack(ctx, tmp, distribution, version, git_url)
+        real_version, source = unpack(c, tmp, distribution, version, git_url)
         abs_source = os.path.join(tmp, source)
         source_package = os.path.join(abs_source, package)
         # Ensure source package exists
@@ -99,9 +101,65 @@ def vendorize(ctx, distribution, version, vendor_dir, package=None,
         rmtree(tmp)
 
 
+@task(name='all')
+def all_(c):
+    """
+    Catchall version-bump/tag/changelog/PyPI upload task.
+    """
+
+
 @task
-def release(ctx):
+def changelog(c, target='docs/changelog.rst'):
     """
-    Upload an sdist to PyPI via ye olde 'setup.py sdist register upload'.
+    Update changelog with new release entry.
     """
-    ctx.run("python setup.py sdist register upload")
+    pass
+
+
+@task
+def version(c):
+    """
+    Update stored project version (e.g. a ``_version.py``.)
+
+    Requires configuration to be effective (since version file is usually kept
+    within a project-named directory.
+    """
+    pass
+
+
+@task
+def tag(c):
+    """
+    Create a release tag.
+
+    May set a config option for a prefix, e.g. 'v1.0.0' vs just '1.0.0'. This
+    is unset/blank by default.
+    """
+    pass
+
+
+@task
+def push(c):
+    """
+    Push tag/changelog/version changes to Git origin.
+    """
+    # TODO: or should this be distributed amongst the appropriate tasks?
+    pass
+
+
+@task
+def publish(c, wheel=False):
+    """
+    Publish code to PyPI.
+    """
+    # TODO: Use twine.
+    parts = ["python", "setup.py", "sdist"]
+    if wheel:
+        parts.append("bdist_wheel")
+    parts.append("register")
+    parts.append("upload")
+    c.run(" ".join(parts))
+
+
+release = Collection('release', changelog, version, tag, push)
+release.add_task(all_, default=True)
